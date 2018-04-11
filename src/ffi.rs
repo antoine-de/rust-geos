@@ -2,7 +2,7 @@ use libc::{atexit, c_char, c_double, c_int, c_uint, c_void, size_t};
 use std::sync::{Once, ONCE_INIT};
 use std::ffi::{CStr, CString};
 use std::{ptr, str};
-use error::{Error, Result as GeosResult};
+use error::{Error, Result as GeosResult, PredicateType};
 use std;
 use num_traits::FromPrimitive;
 
@@ -374,6 +374,14 @@ pub struct GGeom {
     obj: SafeCGeom,
 }
 
+fn check_geos_predicate(val: i32, p: PredicateType) -> GeosResult<bool> {
+    match val {
+        1 => Ok(true),
+        0 => Ok(false),
+        _ => Err(Error::GeosFunctionError(p, val))
+    } 
+}
+
 impl GGeom {
     pub fn new(wkt: &str) -> GeosResult<GGeom> {
         initialize();
@@ -455,13 +463,7 @@ impl GGeom {
 
     pub fn is_ring(&self) -> GeosResult<bool> {
         let rv = unsafe { GEOSisRing(self.c_obj()) };
-        if rv == 1 {
-            Ok(true)
-        } else if rv == 0 {
-            Ok(false)
-        } else {
-            Err(Error::GeosError("computing isRing".into()))
-        }
+        check_geos_predicate(rv, PredicateType::Intersects)
     }
 
     pub fn intersects(&self, g2: &GGeom) -> GeosResult<bool> {
@@ -904,5 +906,30 @@ impl PreparedGGeom {
         } else {
             Err(Error::GeosError("computing within predicate on prepared geometry".into()))
         }
+    }
+}
+
+
+#[cfg(test)]
+mod test {
+    use super::{check_geos_predicate};
+    use error::PredicateType;
+
+    #[test]
+    fn check_geos_predicate_ok_test() {
+        assert_eq!(check_geos_predicate(0, PredicateType::Intersects).unwrap(), false);
+    }
+
+    #[test]
+    fn check_geos_predicate_ko_test() {
+        assert_eq!(check_geos_predicate(1, PredicateType::Intersects).unwrap(), true);
+    }
+
+    #[test]
+    fn check_geos_predicate_err_test() {
+        let r = check_geos_predicate(42, PredicateType::Intersects);
+        let e = r.err().unwrap();
+
+        assert_eq!(format!("{}", e), "error while calling libgeos method intersects (error number = 42)".to_string());
     }
 }
